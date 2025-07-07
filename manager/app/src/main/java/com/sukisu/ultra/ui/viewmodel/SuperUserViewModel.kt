@@ -40,6 +40,8 @@ import com.topjohnwu.superuser.Shell
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.atomic.AtomicInteger
 
 // 应用分类
 enum class AppCategory(val displayNameRes: Int, val persistKey: String) {
@@ -84,9 +86,6 @@ class SuperUserViewModel : ViewModel() {
         private const val KEY_SHOW_SYSTEM_APPS = "show_system_apps"
         private const val KEY_SELECTED_CATEGORY = "selected_category"
         private const val KEY_CURRENT_SORT_TYPE = "current_sort_type"
-        private const val CORE_POOL_SIZE = 4
-        private const val MAX_POOL_SIZE = 8
-        private const val KEEP_ALIVE_TIME = 60L
         private const val BATCH_SIZE = 20
     }
 
@@ -116,18 +115,7 @@ class SuperUserViewModel : ViewModel() {
             }
     }
 
-    private val appProcessingThreadPool = ThreadPoolExecutor(
-        CORE_POOL_SIZE,
-        MAX_POOL_SIZE,
-        KEEP_ALIVE_TIME,
-        TimeUnit.SECONDS,
-        LinkedBlockingQueue()
-    ) { runnable ->
-        Thread(runnable, "AppProcessing-${System.currentTimeMillis()}").apply {
-            isDaemon = true
-            priority = Thread.NORM_PRIORITY
-        }
-    }.asCoroutineDispatcher()
+    private val appProcessingThreadPool = createAppProcessingThreadPool().asCoroutineDispatcher()
 
     private val appListMutex = Mutex()
 
@@ -159,6 +147,31 @@ class SuperUserViewModel : ViewModel() {
         private set
     var loadingMessage by mutableStateOf("")
         private set
+
+    /**
+     * 创建用于处理应用列表的线程池
+     */
+    private fun createAppProcessingThreadPool(
+        corePoolSize: Int = 4,
+        maxPoolSize: Int = 8,
+        keepAliveTime: Long = 60L
+    ): ThreadPoolExecutor {
+        val threadNumber = AtomicInteger(1)
+        val threadFactory = ThreadFactory { runnable ->
+            Thread(runnable, "AppProcessor-${threadNumber.getAndIncrement()}").apply {
+                isDaemon = true
+                priority = Thread.NORM_PRIORITY
+            }
+        }
+        return ThreadPoolExecutor(
+            corePoolSize,
+            maxPoolSize,
+            keepAliveTime,
+            TimeUnit.SECONDS,
+            LinkedBlockingQueue(),
+            threadFactory
+        )
+    }
 
     /**
      * 从SharedPreferences加载显示系统应用设置
